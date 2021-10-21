@@ -10,5 +10,9 @@
   "license": "ISC",
   "workspaces": [
     "blockchain"
-  ]
+  ],
+  "mocha": {
+    "require": ["hardhat/register"],
+    "timeout": 20000
+  }
 }

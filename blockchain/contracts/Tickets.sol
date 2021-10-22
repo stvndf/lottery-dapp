@@ -7,35 +7,41 @@ import "@chainlink/contracts/src/v0.8/VRFConsumerBase.sol";
 
 contract Tickets is Ownable, VRFConsumerBase {
     constructor(
-        address _vrfCoordinator,
-        address _link,
-        uint128 _ticketPrice,
-        uint128 _prize,
-        uint16 _qtyOfEarlyBirds,
-        uint16 _qtyOfTicketsToSell,
-        uint8 _qtyOfWinners
+        address vrfCoordinator_,
+        address link_,
+        bytes32 keyHash_,
+        uint256 fee_,
+
+        uint128 ticketPrice_,
+        uint128 prize_,
+        uint16 qtyOfTicketsToSell_,
+        uint16 qtyOfEarlyBirds_,
+        uint8 qtyOfWinners_
     )
     VRFConsumerBase(
-        _vrfCoordinator, _link
+        vrfCoordinator_, link_
     )
      {
-        ticketPrice = _ticketPrice;
-        prize = _prize;
-        qtyOfEarlyBirds = _qtyOfEarlyBirds;
-        qtyOfTicketsToSell = _qtyOfTicketsToSell;
-        qtyOfWinners = _qtyOfWinners;
+         _keyHash = keyHash_;
+         _fee = fee_;
+
+        setTicketPrice(ticketPrice_);
+        setPrize(prize_);
+        setQtyOfTicketsToSell(qtyOfTicketsToSell_);
+        setQtyOfEarlyBirds(qtyOfEarlyBirds_);
+        setQtyOfWinners(qtyOfWinners_);
     }
 
     // Chainlink VRF
-    // keyHash //TODO
-    // fee //TODO
+    bytes32 private _keyHash;
+    uint256 private _fee;
 
     // Configurables
     uint128 public ticketPrice; // wei
     uint128 public prize; // wei to be split between qtyOfWinners
-    uint16 public qtyOfEarlyBirds; // initial entrants to receive bonus ticket upon purchase
     uint16 public qtyOfTicketsToSell; // round ends when this number of tickets is sold
-    uint8 public qtyOfWinners; // quantity of entrants to split prize
+    uint16 public qtyOfEarlyBirds; // initial entrants to receive bonus ticket upon purchase
+    uint16 public qtyOfWinners; // quantity of entrants to split prize
 
     struct EntrantLatestDetails {
         uint16 latestRound;
@@ -47,7 +53,7 @@ contract Tickets is Ownable, VRFConsumerBase {
     uint16 public soldTickets = 0;
     uint16 public bonusTickets = 0; // obtained through referring or early bird purchases
     uint16 public currentRound = 1;
-    bool roundResetInProcess = false;
+    bool public roundResetInProcess = false;
 
     function getEntrantNumOfTickets() external view returns (uint16) {
         uint16 latestRound = entrantDetails[msg.sender].latestRound;
@@ -59,29 +65,31 @@ contract Tickets is Ownable, VRFConsumerBase {
         }
     }
 
-    function setTicketPrice(uint128 newTicketPrice) external onlyOwner {
+    function setTicketPrice(uint128 newTicketPrice) public onlyOwner {
         ticketPrice = newTicketPrice;
     }
 
-    function setPrize(uint128 newPrize) external onlyOwner {
+    function setPrize(uint128 newPrize) public onlyOwner {
+        require(roundResetInProcess == false, "Round is currently resetting");
         prize = newPrize;
     }
 
-    function setqtyOfEarlyBirds(uint16 newQtyOfEarlyBirds) external onlyOwner {
-        require(newQtyOfEarlyBirds <= qtyOfTicketsToSell, "Cannot be higher than qtyOfTicketsToSell");
-        qtyOfEarlyBirds = newQtyOfEarlyBirds;
-    }
-
-    function setqtyOfTicketsToSell(uint16 newQtyOfTicketsToSell)
-        external
+    function setQtyOfTicketsToSell(uint16 newQtyOfTicketsToSell)
+        public
         onlyOwner
     {
         require(newQtyOfTicketsToSell >= 1, "Must be at least 1");
         qtyOfTicketsToSell = newQtyOfTicketsToSell;
     }
 
-    function setqtyOfWinners(uint8 newQtyOfWinners) external onlyOwner {
+    function setQtyOfEarlyBirds(uint16 newQtyOfEarlyBirds) public onlyOwner {
+        require(newQtyOfEarlyBirds <= qtyOfTicketsToSell, "Cannot be higher than qtyOfTicketsToSell");
+        qtyOfEarlyBirds = newQtyOfEarlyBirds;
+    }
+
+    function setQtyOfWinners(uint16 newQtyOfWinners) public onlyOwner {
         require(newQtyOfWinners >= 1, "Must be at least 1");
+        require(roundResetInProcess == false, "Round is currently resetting");
         qtyOfWinners = newQtyOfWinners;
     }
 
@@ -112,8 +120,7 @@ contract Tickets is Ownable, VRFConsumerBase {
     function _buyTicket() private {
         soldTickets += 1;
 
-        if (soldTickets <= qtyOfEarlyBirds) {
-            // early bird
+        if (soldTickets <= qtyOfEarlyBirds) { // early bird
             bonusTickets += 1;
             entrantDetails[msg.sender].numOfTicketsOwned += 2;
         } else {
@@ -136,13 +143,14 @@ contract Tickets is Ownable, VRFConsumerBase {
         require(success, "Unsuccessful transfer");
     }
 
-    function withdrawLink() external onlyOwner {
-        //TODO
+    function withdrawLink(uint256 amount) external onlyOwner {
+        //TODO probaby not all. maybe change above name to withdrawSurplus. maybe check
     }
 
     function _endOfRound() private {
+        require(LINK.balanceOf(address(this)) >= _fee, "Unable to reset round: insufficient LINK");
         roundResetInProcess = true;
-        //TODO call VRF
+        requestRandomness(_keyHash, _fee);
     }
 
     mapping(address => uint16) winnersSelected;
@@ -198,8 +206,12 @@ contract Tickets is Ownable, VRFConsumerBase {
         }
     }
 
-    function _distributePrize() private pure {
-        //TODO
+    function _distributePrize(address[] memory winnerSelection) private {
+        uint256 prizeEach = prize / qtyOfWinners;
+        for (uint16 i=0; i<winnerSelection.length; i++) {
+            (bool success, ) = winnerSelection[i].call{value: uint256(prizeEach)}("");
+            require(success, "Unsuccessful transfer");
+        }
     }
 
     function fulfillRandomness(bytes32 requestId, uint256 randomness) internal override { //TODO ensure doesn't use 200k gas @1100
@@ -230,8 +242,7 @@ contract Tickets is Ownable, VRFConsumerBase {
 
             winnerSelection[i] = selectedWinnerAddress;
         }
-        //TODO change this to VRF response function
-        _distributePrize();
+        _distributePrize(winnerSelection);
         _resetRound();
     }
 

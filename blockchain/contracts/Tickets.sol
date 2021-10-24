@@ -49,7 +49,8 @@ contract Tickets is Ownable, VRFConsumerBase {
     }
 
     mapping(address => EntrantLatestDetails) private entrantDetails; // entrant => latest round participated, num of tickets
-    mapping(uint16 => address) private ticketToOwner; // contains sold & bonus tickets
+    mapping(uint16 => address) public ticketToOwner; // contains sold & bonus tickets //TODO revert public => private
+    mapping(uint16 => address[]) private roundToWinners; // contains each round's winners (starts at 1)
     uint16 public soldTickets = 0;
     uint16 public bonusTickets = 0; // obtained through referring or early bird purchases
     uint16 public totalTickets = 0;
@@ -122,10 +123,13 @@ contract Tickets is Ownable, VRFConsumerBase {
     function _buyTicket() private {
         soldTickets += 1;
         ticketToOwner[(soldTickets - 1) + bonusTickets] = msg.sender;
+// console.log("(soldTickets - 1) + bonusTickets:", (soldTickets - 1) + bonusTickets);
 
         if (soldTickets <= qtyOfEarlyBirds) { // early bird
             bonusTickets += 1;
             totalTickets += 2;
+            ticketToOwner[(bonusTickets - 1) + soldTickets] = msg.sender;
+// console.log("(bonusTickets - 1) + soldTickets:", (bonusTickets - 1) + soldTickets);
             entrantDetails[msg.sender].numOfTicketsOwned += 2;
         } else {
             totalTickets += 1;
@@ -159,104 +163,98 @@ contract Tickets is Ownable, VRFConsumerBase {
         requestRandomness(_keyHash, _fee);
     }
 
-    mapping(address => uint16) winnersSelected;
-
     function _getRandomTicketNumber(
         uint256 randomValue,
-        uint16 nonce1,
-        uint16 nonce2
+        uint16 nonce
     ) private view returns (uint16) {
-        return
-            uint16(
-                uint256(keccak256(abi.encode(randomValue, nonce1, nonce2))) % totalTickets
-            );
+console.log(">>>totalTickets:", totalTickets);
+        uint16 selectedRandomIndex = uint16(uint256(keccak256(abi.encode(randomValue, nonce))) % totalTickets);
+console.log(">>>selectedRandomIndex:", selectedRandomIndex);
+// console.log(">>>selectedRandomIndex:", selectedRandomIndex);
+// console.log(">>>ticketToOwner[selectedRandomIndex]:", ticketToOwner[selectedRandomIndex]);
+// console.log("0:", ticketToOwner[0]);
+// console.log("1:", ticketToOwner[1]);
+// console.log("2:", ticketToOwner[2]);
+// console.log("3:", ticketToOwner[3]);
+// console.log("4:", ticketToOwner[4]);
+// console.log("5:", ticketToOwner[5]);
+// console.log("6:", ticketToOwner[6]);
+// console.log("7:", ticketToOwner[7]);
+// console.log("8:", ticketToOwner[8]);
+// console.log("9:", ticketToOwner[9]);
+// console.log("10:", ticketToOwner[10]);
+// console.log("11:", ticketToOwner[11]);
+// console.log("12:", ticketToOwner[12]);
+        return selectedRandomIndex;
     }
 
     function _checkForDuplicateWinner(
-        uint16 i,
-        address selectedWinnerAddress,
-        address[] memory winnerSelection,
         uint256 randomness,
-        uint16 qtyOfTicketsRemaining
+        address winnerAddress,
+        address[] memory winnerSelection,
+        uint16 qtyOfWinnersIndex
     ) private returns (address) {
         bool duplicateFound = false;
-        for (uint16 j = 0; j < i; j++) {
-            if (selectedWinnerAddress == winnerSelection[j] && qtyOfTicketsRemaining > 0) {
-                uint16 selectedWinnerIndex = _getRandomTicketNumber(
-                    randomness,
-                    i,
-                    j
-                );
-                selectedWinnerAddress = ticketToOwner[selectedWinnerIndex];
+        for (uint16 j = 0; j < qtyOfWinnersIndex; j++) {
+            if (winnerAddress == winnerSelection[j]) {
+                uint16 winnerIndex = _getRandomTicketNumber(randomness, qtyOfWinnersIndex);
                 duplicateFound = true;
 
                 // Removing the winner from the pool
-                ticketToOwner[selectedWinnerIndex] = ticketToOwner[
-                    totalTickets - 1
-                ];
-                qtyOfTicketsRemaining--;
+                ticketToOwner[winnerIndex] = ticketToOwner[totalTickets - 1];
+                totalTickets--;
+
                 break;
             }
         }
         if (duplicateFound == true) {
             return _checkForDuplicateWinner(
-                i,
-                selectedWinnerAddress,
-                winnerSelection,
                 randomness,
-                qtyOfTicketsRemaining
+                winnerAddress,
+                winnerSelection,
+                qtyOfWinnersIndex
             );
         } else {
-            return selectedWinnerAddress;
+            return winnerAddress;
         }
     }
 
-    function _distributePrize(address[] memory winnerSelection) private {
-        uint256 prizeEach = prize / qtyOfWinners;
-console.log("winnerSelection[0]:", winnerSelection[0]);
-console.log("winnerSelection[1]:", winnerSelection[1]);
-        for (uint16 i=0; i<winnerSelection.length; i++) {
-// console.log("winnerSelection:", winnerSelection[i]);
-            (bool success, ) = winnerSelection[i].call{value: uint256(prizeEach)}("");
-            require(success, "Unsuccessful transfer");
+    function _distributePrize(uint16 roundToWinnersLength) private {
+        uint256 prizeEach = prize / roundToWinnersLength;
+        for (uint16 i = 0; i < roundToWinnersLength; i++) {
+console.log("winnerSelection:", roundToWinners[currentRound][i], "i:", i);
+            (bool success, ) = roundToWinners[currentRound][i].call{value: uint256(prizeEach)}("");
+            // require(success, "Unsuccessful transfer");
         }
     }
 
     function fulfillRandomness(bytes32 requestId, uint256 randomness) internal override { //TODO ensure doesn't use 200k gas @1100
         roundResetInProcess = false;
-        address[] memory winnerSelection = new address[](qtyOfWinners);
-// address[] memory winnerSelection2;
-// winnerSelection2[0] = msg.sender;
-// winnerSelection2.length;
-        uint16 qtyOfTicketsRemaining = soldTickets + bonusTickets; // decreases as tickets are selected and removed
+        uint16 roundToWinnersLength = 0;
+
+// address[] memory winnerSelection;
+
+        if (qtyOfEntrants < qtyOfWinners) qtyOfWinners = qtyOfEntrants;
 
         for (uint16 i = 0; i < qtyOfWinners; i++) {
-            uint16 selectedWinnerIndex = _getRandomTicketNumber(
-                randomness,
-                i,
-                0
-            );
-console.log("sel win ind:", selectedWinnerIndex);
-            address selectedWinnerAddress = ticketToOwner[selectedWinnerIndex];
-    console.log("ticketToOwner[0]:", ticketToOwner[0]);
-console.log("selectedWinnerAddress:", selectedWinnerAddress);
-            winnerSelection[i] = ticketToOwner[selectedWinnerIndex];
-
+console.log("Inside loop, i:", i);
+            uint16 winnerIndex = _getRandomTicketNumber(randomness, i);
+            address winnerAddress = ticketToOwner[winnerIndex];
+            roundToWinners[currentRound].push(winnerAddress);
+            roundToWinnersLength++;
+console.log("orig winner: winnerAddress:", winnerAddress);
+// console.log("orig winner: roundToWinners[currentRound][i]", roundToWinners[currentRound][i]);
             // Removing the winner from the pool
-            ticketToOwner[selectedWinnerIndex] = ticketToOwner[totalTickets - 1];
-            qtyOfTicketsRemaining--;
+            ticketToOwner[winnerIndex] = ticketToOwner[totalTickets - 1];
+            totalTickets--;
 
-            selectedWinnerAddress = _checkForDuplicateWinner(
-                i,
-                selectedWinnerAddress,
-                winnerSelection,
-                randomness,
-                qtyOfTicketsRemaining
-            );
-
-            winnerSelection[i] = selectedWinnerAddress;
+            // Repeat winner check
+            if (i > 0) {
+                roundToWinners[currentRound][i] = _checkForDuplicateWinner(randomness, winnerAddress, roundToWinners[currentRound], i);
+            }
         }
-        _distributePrize(winnerSelection);
+
+        _distributePrize(roundToWinnersLength);
         _resetRound();
     }
 

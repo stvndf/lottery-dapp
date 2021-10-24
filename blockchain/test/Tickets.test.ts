@@ -108,6 +108,17 @@ describe("Tickets contract", async () => {
     await setContract(params(defaultParams));
   });
 
+  it("works", async () => {
+    console.log("{test start}")
+
+    await buyTickets("ALL", 2);
+    expect(await contract.soldTickets()).to.equal(defaultParams.qtyOfTicketsToSell)
+
+    await resetRound()
+
+    console.log("{test end}")
+  })
+
   it("Setters set properly", async () => {
     expect(await contract.ticketPrice()).to.equal(defaultParams.ticketPrice);
     expect(await contract.prize()).to.equal(defaultParams.prize);
@@ -181,6 +192,7 @@ describe("Tickets contract", async () => {
   });
 
   it("Properly counts bonus tickets", async () => {
+    expect(await contract.soldTickets()).to.equal(0);
     await buyTickets(2, 1);
     expect(await contract.bonusTickets()).to.equal(2);
 
@@ -216,7 +228,30 @@ describe("Tickets contract", async () => {
 
   it("Ticket sales are locked in between rounds", async () => {
     expect(await contract.roundResetInProcess()).to.equal(false);
-    await buyTickets("ALL");
+    // await buyTickets("ALL");
+await contract.buyTicket({value: toWei(1)})
+// console.log("ticketToOwner:0", await contract.ticketToOwner(0))
+// console.log("ticketToOwner1:", await contract.ticketToOwner(1))
+await contract.buyTicket({value: toWei(1)})
+// console.log("ticketToOwner:2", await contract.ticketToOwner(2))
+// console.log("ticketToOwner:3", await contract.ticketToOwner(3))
+await contract.buyTicket({value: toWei(1)})
+// console.log("ticketToOwner:4", await contract.ticketToOwner(4))
+// console.log("ticketToOwner:5", await contract.ticketToOwner(5))
+await contract.buyTicket({value: toWei(1)})
+// console.log("ticketToOwner:6", await contract.ticketToOwner(6))
+await contract.buyTicket({value: toWei(1)})
+// console.log("ticketToOwner:7", await contract.ticketToOwner(7))
+await contract.buyTicket({value: toWei(1)})
+// console.log("ticketToOwner:8", await contract.ticketToOwner(8))
+await contract.buyTicket({value: toWei(1)})
+// console.log("ticketToOwner:9", await contract.ticketToOwner(9))
+await contract.buyTicket({value: toWei(1)})
+// console.log("ticketToOwner:10", await contract.ticketToOwner(10))
+await contract.buyTicket({value: toWei(1)})
+// console.log("ticketToOwner:11", await contract.ticketToOwner(11))
+await contract.buyTicket({value: toWei(1)})
+// console.log("ticketToOwner:12", await contract.ticketToOwner(12))
 
     expect(await contract.roundResetInProcess()).to.equal(true);
     await expect(
@@ -227,17 +262,17 @@ describe("Tickets contract", async () => {
     expect(await contract.roundResetInProcess()).to.equal(false);
   });
 
-  it("currentRound variable increases each round", async () => {
-    // await setContract(params({...defaultParams, prize: toWei(4)}));
+  // it("currentRound variable increases each round", async () => {
+  //   // await setContract(params({...defaultParams, prize: toWei(4)}));
 
-    let round = 1;
+  //   let round = 1;
 
-    expect(await contract.currentRound()).to.equal(round);
-    buyTickets("ALL", 2);
-    await resetRound();
-    round++;
-    expect(await contract.currentRound()).to.equal(round);
+  //   expect(await contract.currentRound()).to.equal(round);
+  //   buyTickets("ALL", 2);
+  //   await resetRound();
+  //   round++;
+  //   expect(await contract.currentRound()).to.equal(round);
 
 
-  })
+  // })
 });

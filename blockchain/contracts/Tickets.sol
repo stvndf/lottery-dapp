@@ -52,12 +52,14 @@ contract Tickets is Ownable, VRFConsumerBase {
     mapping(uint16 => address) private ticketToOwner; // contains sold & bonus tickets
     uint16 public soldTickets = 0;
     uint16 public bonusTickets = 0; // obtained through referring or early bird purchases
+    uint16 public totalTickets = 0;
     uint16 public currentRound = 1;
+    uint16 public qtyOfEntrants = 0;
     bool public roundResetInProcess = false;
 
-    function getEntrantNumOfTickets() external view returns (uint16) {
-        uint16 latestRound = entrantDetails[msg.sender].latestRound;
-        uint16 numOfTicketsOwned = entrantDetails[msg.sender].numOfTicketsOwned;
+    function getEntrantNumOfTickets(address entrantAddress) external view returns (uint16) {
+        uint16 latestRound = entrantDetails[entrantAddress].latestRound;
+        uint16 numOfTicketsOwned = entrantDetails[entrantAddress].numOfTicketsOwned;
         if (latestRound < currentRound) {
             return 0;
         } else {
@@ -112,23 +114,27 @@ contract Tickets is Ownable, VRFConsumerBase {
 
     modifier buyTicketModifier() {
         require(msg.value == ticketPrice, "Value does not match ticket price");
-        require(soldTickets < qtyOfTicketsToSell, "Round's tickets sold out");
         require(roundResetInProcess == false, "Round is currently resetting");
+        require(soldTickets < qtyOfTicketsToSell, "Round's tickets sold out");
         _;
     }
 
     function _buyTicket() private {
         soldTickets += 1;
+        ticketToOwner[(soldTickets - 1) + bonusTickets] = msg.sender;
 
         if (soldTickets <= qtyOfEarlyBirds) { // early bird
             bonusTickets += 1;
+            totalTickets += 2;
             entrantDetails[msg.sender].numOfTicketsOwned += 2;
         } else {
+            totalTickets += 1;
             entrantDetails[msg.sender].numOfTicketsOwned += 1;
         }
 
         if (entrantDetails[msg.sender].latestRound != currentRound) {
             entrantDetails[msg.sender].latestRound = currentRound;
+            qtyOfEntrants++;
         }
 
         if (soldTickets >= qtyOfTicketsToSell) {
@@ -162,8 +168,7 @@ contract Tickets is Ownable, VRFConsumerBase {
     ) private view returns (uint16) {
         return
             uint16(
-                uint256(keccak256(abi.encode(randomValue, nonce1, nonce2))) %
-                    (soldTickets + bonusTickets)
+                uint256(keccak256(abi.encode(randomValue, nonce1, nonce2))) % totalTickets
             );
     }
 
@@ -176,7 +181,7 @@ contract Tickets is Ownable, VRFConsumerBase {
     ) private returns (address) {
         bool duplicateFound = false;
         for (uint16 j = 0; j < i; j++) {
-            if (selectedWinnerAddress == winnerSelection[j]) {
+            if (selectedWinnerAddress == winnerSelection[j] && qtyOfTicketsRemaining > 0) {
                 uint16 selectedWinnerIndex = _getRandomTicketNumber(
                     randomness,
                     i,
@@ -187,14 +192,14 @@ contract Tickets is Ownable, VRFConsumerBase {
 
                 // Removing the winner from the pool
                 ticketToOwner[selectedWinnerIndex] = ticketToOwner[
-                    qtyOfWinners
+                    totalTickets - 1
                 ];
                 qtyOfTicketsRemaining--;
                 break;
             }
         }
         if (duplicateFound == true) {
-            _checkForDuplicateWinner(
+            return _checkForDuplicateWinner(
                 i,
                 selectedWinnerAddress,
                 winnerSelection,
@@ -208,7 +213,10 @@ contract Tickets is Ownable, VRFConsumerBase {
 
     function _distributePrize(address[] memory winnerSelection) private {
         uint256 prizeEach = prize / qtyOfWinners;
+console.log("winnerSelection[0]:", winnerSelection[0]);
+console.log("winnerSelection[1]:", winnerSelection[1]);
         for (uint16 i=0; i<winnerSelection.length; i++) {
+// console.log("winnerSelection:", winnerSelection[i]);
             (bool success, ) = winnerSelection[i].call{value: uint256(prizeEach)}("");
             require(success, "Unsuccessful transfer");
         }
@@ -217,6 +225,9 @@ contract Tickets is Ownable, VRFConsumerBase {
     function fulfillRandomness(bytes32 requestId, uint256 randomness) internal override { //TODO ensure doesn't use 200k gas @1100
         roundResetInProcess = false;
         address[] memory winnerSelection = new address[](qtyOfWinners);
+// address[] memory winnerSelection2;
+// winnerSelection2[0] = msg.sender;
+// winnerSelection2.length;
         uint16 qtyOfTicketsRemaining = soldTickets + bonusTickets; // decreases as tickets are selected and removed
 
         for (uint16 i = 0; i < qtyOfWinners; i++) {
@@ -225,11 +236,14 @@ contract Tickets is Ownable, VRFConsumerBase {
                 i,
                 0
             );
+console.log("sel win ind:", selectedWinnerIndex);
             address selectedWinnerAddress = ticketToOwner[selectedWinnerIndex];
-            // winnerSelection[i] = ticketToOwner[selectedWinnerIndex];
+    console.log("ticketToOwner[0]:", ticketToOwner[0]);
+console.log("selectedWinnerAddress:", selectedWinnerAddress);
+            winnerSelection[i] = ticketToOwner[selectedWinnerIndex];
 
             // Removing the winner from the pool
-            ticketToOwner[selectedWinnerIndex] = ticketToOwner[qtyOfWinners];
+            ticketToOwner[selectedWinnerIndex] = ticketToOwner[totalTickets - 1];
             qtyOfTicketsRemaining--;
 
             selectedWinnerAddress = _checkForDuplicateWinner(
@@ -250,5 +264,7 @@ contract Tickets is Ownable, VRFConsumerBase {
         currentRound++;
         soldTickets = 0;
         bonusTickets = 0;
+        totalTickets = 0;
+        qtyOfEntrants = 0;
     }
 }

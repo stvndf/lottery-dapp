@@ -13,7 +13,6 @@
     "@openzeppelin/contracts": "^4.3.2"
   },
   "devDependencies": {
-    "@appliedblockchain/chainlink-plugins-fund-link": "^0.0.1",
     "@nomiclabs/hardhat-ethers": "^2.0.2",
     "@nomiclabs/hardhat-waffle": "^2.0.1",
     "@types/chai": "^4.2.22",
@@ -28,7 +27,7 @@
   },
   "mocha": {
     "require": [
-      "hardhat/register"
+      "ts-node/register/files"
     ],
     "timeout": 20000
   }

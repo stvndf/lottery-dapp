@@ -53,13 +53,10 @@ describe("Tickets contract", async () => {
   let defaultParamsForConstructor: (string | number)[];
 
   async function buyTickets(
-    qtyOfTicketsToBuy: number | "ALL",
+    qtyOfTicketsToBuy: number | "ALL20",
     qtyOfAccsToBuyWith = 1
   ) {
-    if (qtyOfAccsToBuyWith < 1 || qtyOfAccsToBuyWith > 20)
-      throw new Error("Invalid number of accounts");
-
-    if (qtyOfTicketsToBuy === "ALL")
+    if (qtyOfTicketsToBuy === "ALL20")
       qtyOfTicketsToBuy = defaultParams.qtyOfTicketsToSell;
 
     for (let i = 0; i < qtyOfTicketsToBuy; i++) {
@@ -108,17 +105,6 @@ describe("Tickets contract", async () => {
     await setContract(params(defaultParams));
   });
 
-  it("works", async () => {
-    console.log("{test start}")
-
-    await buyTickets("ALL", 2);
-    expect(await contract.soldTickets()).to.equal(defaultParams.qtyOfTicketsToSell)
-
-    await resetRound()
-
-    console.log("{test end}")
-  })
-
   it("Setters set properly", async () => {
     expect(await contract.ticketPrice()).to.equal(defaultParams.ticketPrice);
     expect(await contract.prize()).to.equal(defaultParams.prize);
@@ -143,36 +129,36 @@ describe("Tickets contract", async () => {
     expect(await contract.qtyOfWinners()).to.equal(99);
   });
 
-  it("getEntrantNumOfTickets function", async () => {
+  it("getEntrantQtyOfTickets function", async () => {
     expect(
-      await contract.getEntrantNumOfTickets(accounts[0].getAddress())
+      await contract.getEntrantQtyOfTickets(accounts[0].getAddress())
     ).to.equal(0);
     await buyTickets(5, 2);
 
     expect(
-      await contract.getEntrantNumOfTickets(accounts[0].getAddress())
+      await contract.getEntrantQtyOfTickets(accounts[0].getAddress())
     ).to.equal(3 + 2);
     expect(
-      await contract.getEntrantNumOfTickets(accounts[1].getAddress())
+      await contract.getEntrantQtyOfTickets(accounts[1].getAddress())
     ).to.equal(2 + 1);
 
     const remainingTickets = defaultParams.qtyOfTicketsToSell - 5;
     await buyTickets(remainingTickets);
 
     expect(
-      await contract.getEntrantNumOfTickets(accounts[0].getAddress())
+      await contract.getEntrantQtyOfTickets(accounts[0].getAddress())
     ).to.equal(3 + 2 + remainingTickets);
     expect(
-      await contract.getEntrantNumOfTickets(accounts[1].getAddress())
+      await contract.getEntrantQtyOfTickets(accounts[1].getAddress())
     ).to.equal(2 + 1);
 
     await resetRound();
     expect(
-      await contract.getEntrantNumOfTickets(accounts[1].getAddress())
+      await contract.getEntrantQtyOfTickets(accounts[1].getAddress())
     ).to.equal(0);
   });
 
-  it("Properly counts sold tickets", async () => {
+  it("Properly counts soldTickets", async () => {
     expect(await contract.soldTickets()).to.equal(0);
     await buyTickets(3);
     expect(await contract.soldTickets()).to.equal(3);
@@ -191,7 +177,7 @@ describe("Tickets contract", async () => {
     expect(await contract.soldTickets()).to.equal(2);
   });
 
-  it("Properly counts bonus tickets", async () => {
+  it("Properly counts bonusTickets", async () => {
     expect(await contract.soldTickets()).to.equal(0);
     await buyTickets(2, 1);
     expect(await contract.bonusTickets()).to.equal(2);
@@ -207,8 +193,23 @@ describe("Tickets contract", async () => {
     expect(await contract.bonusTickets()).to.equal(0);
   });
 
+  it("Properly counts totalTickets", async () => {
+    expect(await contract.totalTickets()).to.equal(0);
+    await buyTickets(3, 3);
+    expect(await contract.totalTickets()).to.equal(3 + 3);
+
+    const remainingTickets = defaultParams.qtyOfTicketsToSell - 3;
+    await buyTickets(remainingTickets);
+    expect(await contract.totalTickets()).to.equal(
+      defaultParams.qtyOfTicketsToSell + 3
+    );
+
+    await resetRound();
+    expect(await contract.totalTickets()).to.equal(0);
+  });
+
   it("Can't buy over max tickets (before round reset is complete)", async () => {
-    await buyTickets("ALL", 2);
+    await buyTickets("ALL20", 2);
     await expect(
       contract.buyTicket({ value: defaultParams.ticketPrice })
     ).to.be.revertedWith("Round is currently resetting");
@@ -218,41 +219,142 @@ describe("Tickets contract", async () => {
       .not.be.reverted;
   });
 
-  // it("does not give duplicate winner")
-  // it("round number increase upon new round")
-  // it("referral bonus")
-  // it("winners receive share of prize")
-  // do full round (incl resetting) with full expected parameters (1100 sales, use all 20 accs)
-  // must buy ticket for exact amount. also check upon set/change of price
-  // totalTickets check (like sold/bonus tickets)
+  describe("Referral bonus", async () => {
+    it("Referral bonus awarded accurately", async () => {
+      expect(await contract.soldTickets()).to.equal(0);
+      expect(await contract.bonusTickets()).to.equal(0);
+      expect(await contract.totalTickets()).to.equal(0);
+
+      await contract.connect(accounts[0]).buyTicket({ value: toWei(1) });
+      expect(await contract.soldTickets()).to.equal(1);
+      expect(await contract.bonusTickets()).to.equal(1);
+      expect(await contract.totalTickets()).to.equal(1 + 1);
+      expect(
+        await contract.getEntrantQtyOfTickets(accounts[0].getAddress())
+      ).to.equal(1 + 1);
+
+      await contract
+        .connect(accounts[1])
+        .buyTicketWithReferral(accounts[0].getAddress(), { value: toWei(1) });
+
+      expect(await contract.soldTickets()).to.equal(2);
+      expect(await contract.bonusTickets()).to.equal(3);
+      expect(await contract.totalTickets()).to.equal(2 + 2 + 1);
+      expect(
+        await contract.getEntrantQtyOfTickets(accounts[0].getAddress())
+      ).to.equal(1 + (1 + 1)); // 1 bonus ticket for referral
+      expect(
+        await contract.getEntrantQtyOfTickets(accounts[1].getAddress())
+      ).to.equal(1 + 1);
+    });
+
+    it("Referral bonus awarded to self accurately", async () => {
+      await contract.connect(accounts[0]).buyTicket({ value: toWei(1) });
+      expect(await contract.soldTickets()).to.equal(1);
+      expect(await contract.bonusTickets()).to.equal(1);
+      expect(await contract.totalTickets()).to.equal(1 + 1);
+      expect(
+        await contract.getEntrantQtyOfTickets(accounts[0].getAddress())
+      ).to.equal(1 + 1);
+
+      await contract
+        .connect(accounts[0])
+        .buyTicketWithReferral(accounts[0].getAddress(), { value: toWei(1) });
+
+      expect(await contract.soldTickets()).to.equal(2);
+      expect(await contract.bonusTickets()).to.equal(3);
+      expect(await contract.totalTickets()).to.equal(2 + 2 + 1);
+      expect(
+        await contract.getEntrantQtyOfTickets(accounts[0].getAddress())
+      ).to.equal(2 + (2 + 1)); // 1 bonus ticket for referral
+    });
+
+    it("Referral bonus shouldn't be awarded if referrer hasn't participated in current round", async () => {
+      await buyTickets(defaultParams.qtyOfTicketsToSell - 1);
+      await contract.buyTicketWithReferral(accounts[0].getAddress(), {
+        value: toWei(1),
+      });
+      expect(await contract.soldTickets()).to.equal(
+        defaultParams.qtyOfTicketsToSell
+      );
+      expect(await contract.bonusTickets()).to.equal(
+        defaultParams.qtyOfEarlyBirds + 1
+      );
+      expect(await contract.totalTickets()).to.equal(
+        defaultParams.qtyOfTicketsToSell + defaultParams.qtyOfEarlyBirds + 1
+      );
+
+      await resetRound();
+
+      await contract
+        .connect(accounts[1])
+        .buyTicketWithReferral(accounts[0].getAddress(), { value: toWei(1) });
+      expect(await contract.soldTickets()).to.equal(1);
+      expect(await contract.bonusTickets()).to.equal(1);
+      expect(await contract.totalTickets()).to.equal(1 + 1);
+      expect(
+        await contract.getEntrantQtyOfTickets(accounts[0].getAddress())
+      ).to.equal(0); // 0 bonus ticket for referral
+    });
+  });
+
+  describe("Prize awarded accurately", () => {
+    it("Contract's balance correct", async () => {
+      expect(await ethers.provider.getBalance(contract.address)).to.equal(0);
+
+      await buyTickets("ALL20", 3);
+
+      const contractFullRoundBal = (
+        BigInt(defaultParams.ticketPrice) *
+        BigInt(defaultParams.qtyOfTicketsToSell)
+      ).toString();
+      expect(await ethers.provider.getBalance(contract.address)).to.equal(
+        contractFullRoundBal
+      );
+
+      await resetRound();
+      const contractNextRoundBal = (
+        BigInt(contractFullRoundBal) - BigInt(defaultParams.prize)
+      ).toString();
+      expect(await ethers.provider.getBalance(contract.address)).to.equal(
+        contractNextRoundBal
+      );
+    });
+
+    it("Participants' balances correct", async () => {
+      expect(await ethers.provider.getBalance(contract.address)).to.equal(0);
+
+      await buyTickets("ALL20", 3);
+
+      const acc0BalBeforeAward = await accounts[0].getBalance();
+      const acc1BalBeforeAward = await accounts[1].getBalance();
+      const acc2BalBeforeAward = await accounts[2].getBalance();
+
+      await resetRound();
+
+      const acc0BalAfterAward = await accounts[0].getBalance();
+      const acc1BalAfterAward = await accounts[1].getBalance();
+      const acc2BalAfterAward = await accounts[2].getBalance();
+
+      const acc0BalDiff = acc0BalAfterAward.sub(acc0BalBeforeAward);
+      const acc1BalDiff = acc1BalAfterAward.sub(acc1BalBeforeAward);
+      const acc2BalDiff = acc2BalAfterAward.sub(acc2BalBeforeAward);
+
+      const totalBalDiff = acc0BalDiff
+        .add(acc1BalDiff)
+        .add(acc2BalDiff)
+        .toBigInt();
+      const lowerRange =
+        (BigInt(defaultParams.prize) * BigInt(95)) / BigInt(100); // 5% range to account for gas usage
+
+      expect(totalBalDiff <= BigInt(defaultParams.prize)).to.be.true;
+      expect(totalBalDiff >= lowerRange).to.be.true;
+    });
+  });
 
   it("Ticket sales are locked in between rounds", async () => {
     expect(await contract.roundResetInProcess()).to.equal(false);
-    // await buyTickets("ALL");
-await contract.buyTicket({value: toWei(1)})
-// console.log("ticketToOwner:0", await contract.ticketToOwner(0))
-// console.log("ticketToOwner1:", await contract.ticketToOwner(1))
-await contract.buyTicket({value: toWei(1)})
-// console.log("ticketToOwner:2", await contract.ticketToOwner(2))
-// console.log("ticketToOwner:3", await contract.ticketToOwner(3))
-await contract.buyTicket({value: toWei(1)})
-// console.log("ticketToOwner:4", await contract.ticketToOwner(4))
-// console.log("ticketToOwner:5", await contract.ticketToOwner(5))
-await contract.buyTicket({value: toWei(1)})
-// console.log("ticketToOwner:6", await contract.ticketToOwner(6))
-await contract.buyTicket({value: toWei(1)})
-// console.log("ticketToOwner:7", await contract.ticketToOwner(7))
-await contract.buyTicket({value: toWei(1)})
-// console.log("ticketToOwner:8", await contract.ticketToOwner(8))
-await contract.buyTicket({value: toWei(1)})
-// console.log("ticketToOwner:9", await contract.ticketToOwner(9))
-await contract.buyTicket({value: toWei(1)})
-// console.log("ticketToOwner:10", await contract.ticketToOwner(10))
-await contract.buyTicket({value: toWei(1)})
-// console.log("ticketToOwner:11", await contract.ticketToOwner(11))
-await contract.buyTicket({value: toWei(1)})
-// console.log("ticketToOwner:12", await contract.ticketToOwner(12))
-
+    await buyTickets("ALL20");
     expect(await contract.roundResetInProcess()).to.equal(true);
     await expect(
       contract.buyTicket({ value: defaultParams.ticketPrice })
@@ -262,17 +364,144 @@ await contract.buyTicket({value: toWei(1)})
     expect(await contract.roundResetInProcess()).to.equal(false);
   });
 
-  // it("currentRound variable increases each round", async () => {
-  //   // await setContract(params({...defaultParams, prize: toWei(4)}));
+  it("currentRound variable increases each round", async () => {
+    let round = 1;
 
-  //   let round = 1;
+    expect(await contract.currentRound()).to.equal(round);
+    await buyTickets("ALL20");
 
-  //   expect(await contract.currentRound()).to.equal(round);
-  //   buyTickets("ALL", 2);
-  //   await resetRound();
-  //   round++;
-  //   expect(await contract.currentRound()).to.equal(round);
+    await resetRound();
+    round++;
+    expect(await contract.currentRound()).to.equal(round);
+  });
 
+  it("Only vrfCoordinator can call rawFulfillRandomness", async () => {
+    await buyTickets("ALL20");
+    await expect(
+      contract
+        .connect(accounts[0]) // same as address passed as vrfCoordinator
+        .rawFulfillRandomness(
+          "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "1000000000"
+        )
+    ).to.not.be.reverted;
 
-  // })
+    await buyTickets("ALL20");
+    await expect(
+      contract
+        .connect(accounts[1]) // not same as address passed as vrfCoordinator
+        .rawFulfillRandomness(
+          "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "1000000000"
+        )
+    ).to.be.reverted;
+  });
+
+  it("LINK withdrawal", async () => {
+    const beforeAcc0LinkBal = await link.balanceOf(accounts[0].getAddress());
+    const beforeContractLinkBal = await link.balanceOf(contract.address);
+
+    await contract.withdrawLink(100);
+
+    const afterAcc0LinkBal = await link.balanceOf(accounts[0].getAddress());
+    const afterContractLinkBal = await link.balanceOf(contract.address);
+    const acc0BalDiff = afterAcc0LinkBal.sub(beforeAcc0LinkBal).toNumber();
+    const contractBalDiff = beforeContractLinkBal
+      .sub(afterContractLinkBal)
+      .toNumber();
+
+    expect(acc0BalDiff).to.equal(100);
+    expect(contractBalDiff).to.equal(100);
+  });
+
+  it("Crypto withdrawal", async () => {
+    await buyTickets("ALL20");
+
+    await contract.withdrawSurplus();
+
+    const afterContract0Bal = (
+      await ethers.provider.getBalance(contract.address)
+    ).toString();
+
+    expect(afterContract0Bal).to.equal(defaultParams.prize); // restricted to prize amount
+  });
+
+  it("Ticket buys for correct amount", async () => {
+    await contract.buyTicket({ value: toWei(1) });
+    expect(await contract.soldTickets()).to.be.equal(1);
+
+    await expect(contract.buyTicket({ value: toWei(1.1) })).to.be.revertedWith(
+      "Value does not match ticket price"
+    );
+    await expect(contract.buyTicket({ value: toWei(0.9) })).to.be.revertedWith(
+      "Value does not match ticket price"
+    );
+    expect(await contract.soldTickets()).to.be.equal(1);
+
+    await contract.setTicketPrice(toWei(2));
+    await contract.buyTicket({ value: toWei(2) });
+    expect(await contract.soldTickets()).to.be.equal(2);
+
+    await expect(contract.buyTicket({ value: toWei(1) })).to.be.revertedWith(
+      "Value does not match ticket price"
+    );
+    expect(await contract.soldTickets()).to.be.equal(2);
+  });
+
+  it("Emits event properly", async () => {
+    await buyTickets("ALL20", 2);
+
+    const resetRoundTx = await contract
+      .connect(accounts[0])
+      .rawFulfillRandomness(
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "1000000000"
+      );
+    const resetRoundWait = await resetRoundTx.wait();
+    const eventArgs = resetRoundWait.events[0].args;
+    const [
+      roundNumber,
+      qtyOfWinners,
+      winners,
+      totalPrize,
+      prizeEach,
+      timestamp,
+    ]: any = eventArgs;
+    expect(roundNumber).to.equal(1);
+    expect(qtyOfWinners).to.equal(defaultParams.qtyOfWinners);
+    expect(totalPrize).to.equal(defaultParams.prize);
+    expect(prizeEach).to.equal(
+      BigInt(defaultParams.prize) / BigInt(defaultParams.qtyOfWinners)
+    );
+  });
+
+  it("Full round (large non-testing parameters)", async () => {
+    const newParams: Params = {
+      vrfCoordinator: defaultParams.vrfCoordinator,
+      link: defaultParams.link,
+      ticketPrice: toWei(1),
+      prize: toWei(4.5),
+      qtyOfTicketsToSell: 1100,
+      qtyOfEarlyBirds: 100,
+      qtyOfWinners: 2,
+    };
+    await setContract(params(newParams));
+
+    await buyTickets(1100, 20);
+    expect(await contract.soldTickets()).to.equal(newParams.qtyOfTicketsToSell);
+    expect(await contract.bonusTickets()).to.equal(newParams.qtyOfEarlyBirds);
+    expect(await contract.totalTickets()).to.equal(
+      newParams.qtyOfTicketsToSell + newParams.qtyOfEarlyBirds
+    );
+    const acc0TotalTickets =
+      newParams.qtyOfTicketsToSell / 20 + newParams.qtyOfEarlyBirds / 20;
+    expect(
+      await contract.getEntrantQtyOfTickets(accounts[0].getAddress())
+    ).to.equal(acc0TotalTickets);
+
+    await resetRound();
+
+    await contract.buyTicket({ value: toWei(1) });
+    expect(await contract.totalTickets()).to.equal(1 + 1);
+  }).timeout(100000);
 });
